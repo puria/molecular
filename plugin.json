@@ -1,7 +1,7 @@
 {
   "name": "Molecular Typography",
-  "version": "0.1.0",
-  "description": "Shows molecular formula of glyphs based on typtom components",
+  "version": "0.2.0",
+  "description": "Shows the molecular formula of glyphs built from typtom components",
   "init": "molecular-init.js",
   "function": "initPlugin"
 }

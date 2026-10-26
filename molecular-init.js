@@ -1,7 +1,10 @@
 import MolecularPanel from "./molecular-panel.js";
 
-export async function initPlugin(editorController, pluginPath) {
-  console.log("Molecular Typography Plugin loaded!");
-  const molecularPanel = new MolecularPanel(editorController);
-  editorController.addSidebarPanel(molecularPanel, "right");
+export function initPlugin(editorController, pluginPath) {
+  const panel = new MolecularPanel(editorController, `${pluginPath}/molecule.svg`);
+  editorController.addSidebarPanel(panel, "right");
+  // Fontra titles sidebar tabs from its own translation table, which has no entry for plugins
+  document
+    .querySelector(`.sidebar-tab[data-sidebar-name="${panel.identifier}"]`)
+    ?.setAttribute("title", "Molecular formula");
 }

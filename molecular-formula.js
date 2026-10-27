@@ -1,5 +1,5 @@
 export const TYPTOM_LETTERS = {
-  dottom: "D",
+  dotom: "D",
   itom: "I",
   etom: "E",
   vtom: "V",
@@ -10,8 +10,15 @@ export const TYPTOM_LETTERS = {
 
 const SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉";
 
+// The template fonts name the punctuation typtom "dotom"; "dottom" is the same atom.
+const SPELLINGS = { dottom: "dotom" };
+
 export function baseTyptomName(componentName) {
-  return componentName.includes("tom") ? componentName.split(".")[0] : null;
+  if (!componentName.includes("tom")) {
+    return null;
+  }
+  const base = componentName.split(".")[0];
+  return SPELLINGS[base] ?? base;
 }
 
 // Typtom notation: names of x-sorted components in, letters in first-seen order out,

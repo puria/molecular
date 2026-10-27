@@ -1,0 +1,130 @@
+"""Writes molecular-catalogue.js: the molecules (typtom compositions) of the letters,
+digits and punctuation in the molecular fonts, plus the shape of each font's typtoms,
+so the panel can rebuild those molecules with another font's typtoms.
+
+Usage: python scripts/build-molecule-catalogue.py PATH/TO/molecular-fonts
+(a clone of https://github.com/puria/molecular-fonts)
+
+For every font, the default source is read. A molecule is kept when it is made of
+typtom components only (names containing "tom"); alternates such as "S.alt" are
+kept under the character of their base glyph.
+"""
+
+import csv
+import json
+import sys
+from pathlib import Path
+
+REPO = Path(sys.argv[1])
+FONTS = [REPO / "TemplateBase.fontra", REPO / "Rounded.fontra"] + sorted(
+    (REPO / "workshops" / "sources").glob("*.fontra")
+)
+OUTPUT = Path(__file__).resolve().parent.parent / "molecular-catalogue.js"
+TRANSFORM_KEYS = [
+    "translateX", "translateY", "rotation", "scaleX", "scaleY", "skewX", "skewY", "tCenterX", "tCenterY",
+]
+
+
+def default_source(font_data):
+    axes = font_data.get("axes", {}).get("axes", [])
+    for identifier, source in font_data.get("sources", {}).items():
+        location = source.get("location", {})
+        if all(location.get(a["name"], a["defaultValue"]) == a["defaultValue"] for a in axes):
+            return identifier, source
+    raise ValueError("no default source")
+
+
+def characters(font):
+    """glyph name -> character, for glyphs with a printable ASCII code point."""
+    result = {}
+    with open(font / "glyph-info.csv") as f:
+        for row in csv.reader(f, delimiter=";"):
+            if len(row) < 2 or not row[1].strip().startswith("U+"):
+                continue
+            code = int(row[1].split(",")[0].strip()[2:], 16)
+            if 33 <= code <= 126:
+                result[row[0]] = chr(code)
+    return result
+
+
+def molecule(glyph, layer_name):
+    layer = glyph["layers"].get(layer_name) or next(iter(glyph["layers"].values()))
+    static = layer["glyph"]
+    if static.get("path", {}).get("contours"):
+        return None
+    components = []
+    for c in static.get("components", []):
+        if "tom" not in c["name"]:
+            return None
+        t = c.get("transformation", {})
+        components.append(
+            {
+                "name": c["name"],
+                "location": c.get("location", {}),
+                **{k: round(t[k], 3) for k in TRANSFORM_KEYS if k in t},
+            }
+        )
+    if not components:
+        return None
+    return {"glyph": glyph["name"], "components": components, "xAdvance": static.get("xAdvance")}
+
+
+def typtom_geometry(glyph, default_layer):
+    """[{location, bounds}] for the default layer and every glyph-axis source of a
+    contour-drawn typtom (bounds from on- and off-curve points)."""
+    samples = []
+    for source in glyph.get("sources", []):
+        at_default = source["layerName"] == default_layer
+        on_glyph_axis = source.get("location") and source.get("locationBase") == default_layer
+        layer = glyph["layers"].get(source["layerName"])
+        if not (at_default or on_glyph_axis) or layer is None:
+            continue
+        points = [p for c in layer["glyph"].get("path", {}).get("contours", []) for p in c["points"]]
+        if points:
+            xs = [p["x"] for p in points]
+            ys = [p["y"] for p in points]
+            samples.append(
+                {
+                    "location": source.get("location", {}) if on_glyph_axis else {},
+                    "bounds": {"xMin": min(xs), "yMin": min(ys), "xMax": max(xs), "yMax": max(ys)},
+                }
+            )
+    return samples
+
+
+fonts = []
+for font in FONTS:
+    font_data = json.loads((font / "font-data.json").read_text())
+    layer_name, source = default_source(font_data)
+    cap_height = source["lineMetricsHorizontalLayout"]["capHeight"]["value"]
+    by_name = characters(font)
+    molecules = {}
+    typtoms = {}
+    for path in sorted((font / "glyphs").glob("*.json")):
+        glyph = json.loads(path.read_text())
+        if "tom" in glyph["name"]:
+            axis = (glyph.get("axes") or [None])[0]
+            samples = typtom_geometry(glyph, layer_name)
+            if samples:
+                typtoms[glyph["name"]] = {
+                    "axis": axis and {k: axis[k] for k in ("name", "minValue", "defaultValue", "maxValue")},
+                    "samples": samples,
+                }
+        character = by_name.get(glyph["name"]) or by_name.get(glyph["name"].split(".")[0])
+        entry = character and molecule(glyph, layer_name)
+        if entry:
+            molecules.setdefault(character, []).append(entry)
+    fonts.append({"name": font.stem, "capHeight": cap_height, "typtoms": typtoms, "molecules": molecules})
+    print(f"{font.stem}: {sum(map(len, molecules.values()))} molecules, {len(typtoms)} typtoms")
+
+OUTPUT.write_text(
+    "// Generated by scripts/build-molecule-catalogue.py from\n"
+    "// https://github.com/puria/molecular-fonts; do not edit.\n"
+    "// Per font: { name, capHeight,\n"
+    "//   typtoms: { name: { axis, samples: [{ location, bounds }] } },\n"
+    "//   molecules: { character: [{ glyph, xAdvance, components: [{ name, location,\n"
+    "//     translateX, translateY, rotation, scaleX, scaleY, skewX, skewY, tCenterX,\n"
+    "//     tCenterY }] }] } }; missing transformation fields are 0 (scale 1).\n"
+    f"export const MOLECULE_FONTS = {json.dumps(fonts, separators=(',', ':'))};\n"
+)
+print(f"wrote {OUTPUT.name} ({OUTPUT.stat().st_size // 1024} KiB)")
